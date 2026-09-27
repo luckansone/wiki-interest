@@ -1,0 +1,14 @@
+[run]
+branch = True
+parallel = True
+relative_files = True
+source = scripts, evals
+patch = subprocess
+sigterm = True
+omit =
+    tests/*
+
+[report]
+precision = 1
+show_missing = True
+fail_under = 85

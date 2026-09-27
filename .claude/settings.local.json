@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3 -c \"import pandas, scipy, matplotlib, requests, numpy; print\\(pandas.__version__, numpy.__version__, scipy.__version__, matplotlib.__version__\\)\")",
+      "Bash(python3 -c \"import pytest, pypdf; print\\('pytest ok'\\)\")"
+    ]
+  }
+}

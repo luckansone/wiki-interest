@@ -1,0 +1,48 @@
+default_language_version:
+  python: python3.13
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-executables-have-shebangs
+      - id: check-docstring-first
+      - id: detect-private-key
+      - id: debug-statements
+      - id: check-case-conflict
+      - id: mixed-line-ending
+      - id: check-merge-conflict
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.5
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+      - id: codespell
+        types_or: [python, markdown]
+        additional_dependencies: [tomli]
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.11.1
+    hooks:
+      - id: uv-lock
+      # keep the pip fallback of scripts/wi pinned to the same versions as uv.lock
+      - id: uv-export
+        args: ["--frozen", "--no-dev", "--no-hashes", "--no-emit-project", "--output-file=requirements.txt"]

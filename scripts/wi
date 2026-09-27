@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Launcher for the skill CLI. stdout is always one JSON object; setup messages go to stderr.
+#   1. WI_PYTHON set  -> use that interpreter as is.
+#   2. uv on PATH     -> `uv run --frozen`: Python from .python-version (downloaded if missing),
+#                        runtime deps from uv.lock, synced into .venv (dev tools are not installed).
+#   3. a Python >= 3.11 that already has the packages (e.g. the claude.ai code sandbox) -> use it, no install.
+#   4. otherwise      -> a Python >= 3.11 from PATH + pip, pinned by requirements.txt (exported from uv.lock).
+set -euo pipefail
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ -n "${WI_PYTHON:-}" ]; then
+  exec "$WI_PYTHON" "$DIR/scripts/wi.py" "$@"
+fi
+
+if command -v uv >/dev/null 2>&1; then
+  exec uv run --quiet --frozen --no-dev --project "$DIR" python "$DIR/scripts/wi.py" "$@"
+fi
+
+VENV="$DIR/.venv"
+if [ ! -f "$VENV/.wi-ready" ]; then
+  HAS_DEPS='import sys; assert sys.version_info >= (3, 11)
+import pandas, numpy, scipy, matplotlib, requests
+assert int(pandas.__version__.split(".")[0]) >= 2'
+  for c in python3 python3.14 python3.13 python3.12 python3.11; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c "$HAS_DEPS" 2>/dev/null; then
+      exec "$c" "$DIR/scripts/wi.py" "$@"
+    fi
+  done
+fi
+
+# The marker is written only after pip succeeds, so a half-built venv is rebuilt next time.
+if [ ! -f "$VENV/.wi-ready" ]; then
+  PY=""
+  for c in python3.14 python3.13 python3.12 python3.11 python3; do
+    if command -v "$c" >/dev/null 2>&1 && "$c" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
+      PY="$c"
+      break
+    fi
+  done
+  if [ -z "$PY" ]; then
+    echo '{"error":"Python >= 3.11 not found and uv is not installed","fix":"install uv (curl -LsSf https://astral.sh/uv/install.sh | sh); it downloads the right Python by itself. Then re-run the same command."}'
+    exit 1
+  fi
+  echo "wi: first run, creating $VENV with $PY (about a minute)..." >&2
+  "$PY" -m venv --clear "$VENV" >&2
+  "$VENV/bin/pip" install -q --disable-pip-version-check -r "$DIR/requirements.txt" >&2
+  touch "$VENV/.wi-ready"
+fi
+exec "$VENV/bin/python" "$DIR/scripts/wi.py" "$@"

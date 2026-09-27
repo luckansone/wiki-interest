@@ -1,0 +1,86 @@
+[project]
+name = "wiki-interest"
+version = "0.2.0"
+description = "Agent Skill: topic interest trends across Wikipedia language editions, with confidence, charts and a PDF report (one-page summary + appendix)"
+readme = "README.md"
+keywords = ["agent-skills", "wikipedia", "pageviews", "wikidata", "trend-analysis", "localization"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+requires-python = ">=3.11,<3.15"
+
+# Runtime deps only: this is what `bash scripts/wi` installs (pure wheels, no system packages).
+dependencies = [
+    "requests >= 2.32, < 3",
+    "pandas >= 2.2, < 4",
+    "numpy >= 1.26, < 3",
+    "scipy >= 1.13, < 2",
+    "matplotlib >= 3.9, < 4",
+]
+
+[dependency-groups]
+dev = [
+    {include-group = "lint"},
+    {include-group = "tests"},
+]
+lint = [
+    "pre-commit",
+    "ruff",
+]
+tests = [
+    "pytest",
+    "pytest-cov",
+    "pypdf >= 4",
+]
+
+[tool.uv]
+# A skill, not a library: install dependencies only, code runs from scripts/.
+package = false
+default-groups = ["dev"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+exclude = [
+    ".git",
+    "__pycache__",
+    ".ruff_cache",
+    ".venv",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "D"]  # See https://docs.astral.sh/ruff/rules/ for all rules.
+ignore = [
+    "E731",  # Allow assignment of a lambda expression.
+    "E741",  # Allow variable names `l`, `O`, and `I` (`l` = language code throughout).
+    "D100",  # Do not require a public-module docstring.
+    "D101",  # Do not require a public-class docstring.
+    "D102",  # Do not require a public-method docstring.
+    "D103",  # Do not require a public-function docstring.
+    "D104",  # Do not require a public-package docstring.
+    "D105",  # Do not require a magic-method docstring.
+    "D107",  # Do not require an `__init__` docstring.
+    "D203",  # Do not require a blank line before a class docstring.
+    "D213",  # Do not require the summary on the second line.
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/wi.py" = ["E402"]  # imports follow the sys.path setup for the flat scripts/ layout
+
+[tool.ruff.lint.isort]
+lines-after-imports = 2
+known-first-party = ["metrics", "report", "wi", "wiki_api", "fake_api", "run_eval"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-markers --strict-config"
+pythonpath = ["scripts", "tests", "evals"]
+testpaths = ["tests"]

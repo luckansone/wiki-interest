@@ -1,0 +1,14 @@
+.venv/
+wi_output/
+evals/traces/
+evals/out/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+test-results.xml
+htmlcov/
+build/
+dist/
