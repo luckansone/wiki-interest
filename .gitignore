@@ -12,3 +12,6 @@ test-results.xml
 htmlcov/
 build/
 dist/
+
+# local Claude Code settings (personal permissions)
+.claude/settings.local.json

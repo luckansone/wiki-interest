@@ -22,6 +22,9 @@ import time
 from pathlib import Path
 
 import requests
+from pydantic import BaseModel, ConfigDict, Field
+from rich.console import Console
+from rich.table import Table
 
 
 SKILL_DIR = Path(__file__).resolve().parents[1]
@@ -32,6 +35,34 @@ FILE_CMDS = ("cat", "ls", "head", "pwd")  # read-only; path arguments must stay 
 PCT_RE = r"[+\-−]?\d+(?:[.,]\d+)?\s?%"
 # Free OpenRouter model with tool calling (262K context); override with --model / EVAL_MODEL.
 DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free"
+
+
+class Expect(BaseModel):
+    """Automatic checks for one scenario (see `check`)."""
+
+    model_config = ConfigDict(extra="forbid")  # a typo in scenarios.json must fail, not silently skip a check
+
+    clarify: bool = False  # the agent must ask (e.g. which languages) instead of running analyze
+    langs: list[str] = []
+    months: int | None = None
+    pdf: bool = False  # the answer must give the PDF path, and --no-pdf is not allowed
+    question: bool = False  # the command must pass --question (the PDF title)
+    max_tool_calls: int = 6
+    mention_any: list[list[str]] = []  # each group: the answer must contain at least one of the words
+
+
+class Scenario(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    prompt: str
+    expect: Expect = Field(default_factory=Expect)
+
+
+def load_scenarios(path: Path | None = None) -> list[Scenario]:
+    path = path or SKILL_DIR / "evals" / "scenarios.json"
+    return [Scenario.model_validate(s) for s in json.loads(path.read_text())]
+
 
 TOOLS = [
     {
@@ -48,6 +79,19 @@ TOOLS = [
             "name": "read_file",
             "description": "Read a text file (path relative to the skill directory).",
             "parameters": {"type": "object", "properties": {"path": {"type": "string"}}, "required": ["path"]},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            # Same role as claude.ai's present_files: the user sees a file card only after this call.
+            "name": "present_files",
+            "description": "Show files (PDF, images) to the user in the chat as downloadable cards.",
+            "parameters": {
+                "type": "object",
+                "properties": {"filepaths": {"type": "array", "items": {"type": "string"}}},
+                "required": ["filepaths"],
+            },
         },
     },
 ]
@@ -76,6 +120,12 @@ def _inside(path: str) -> bool:
 
 
 def run_tool(name: str, args: dict, env: dict) -> str:
+    if name == "present_files":  # only checks that the files exist; it never reads them
+        paths = args.get("filepaths") or []
+        missing = [p for p in paths if not Path(p).is_file()]
+        if not paths or missing:
+            return f"error: no such file: {', '.join(missing) or '(none given)'}"
+        return "shown to the user: " + ", ".join(Path(p).name for p in paths)
     if name == "read_file":
         if not _inside(args.get("path", "")):
             return "error: path outside the skill directory"
@@ -121,8 +171,9 @@ def chat(base_url: str, api_key: str, model: str, messages: list) -> dict:
     raise RuntimeError(f"model API failed: {r.status_code} {r.text[:300]}")
 
 
-def run_scenario(sc: dict, chat_fn, env: dict, max_steps: int = 12) -> dict:
-    messages = [{"role": "system", "content": system_prompt()}, {"role": "user", "content": sc["prompt"]}]
+def run_scenario(sc: Scenario | dict, chat_fn, env: dict, max_steps: int = 12) -> dict:
+    sc = Scenario.model_validate(sc)
+    messages = [{"role": "system", "content": system_prompt()}, {"role": "user", "content": sc.prompt}]
     calls, outputs, usage = [], [], {"prompt_tokens": 0, "completion_tokens": 0}
     answer = ""
     for _ in range(max_steps):
@@ -167,12 +218,12 @@ def allowed_percents(outputs: list[str]) -> set[float]:
     return found
 
 
-def check(sc: dict, res: dict) -> list[str]:
+def check(sc: Scenario | dict, res: dict) -> list[str]:
     fails = []
     cmds = [c["args"].get("command", "") for c in res["calls"] if c["tool"] == "bash"]
     analyze = [c for c in cmds if " analyze" in c]
-    exp = sc.get("expect", {})
-    if exp.get("clarify"):
+    exp = Expect.model_validate(sc["expect"] if isinstance(sc, dict) else sc.expect)
+    if exp.clarify:
         if analyze:
             fails.append("ran analyze instead of asking which languages")
         if "?" not in res["answer"]:
@@ -181,23 +232,24 @@ def check(sc: dict, res: dict) -> list[str]:
     if not analyze:
         return ["analyze was never run"]
     last = analyze[-1]
-    for l in exp.get("langs", []):
+    for l in exp.langs:
         if not re.search(rf"--langs[ =][^-]*\b{l}\b", last):
             fails.append(f"language {l} missing in command")
-    if exp.get("months") and not re.search(rf"--months[ =]{exp['months']}\b", last):
-        fails.append(f"expected --months {exp['months']}")
-    if exp.get("pdf"):
+    if exp.months and not re.search(rf"--months[ =]{exp.months}\b", last):
+        fails.append(f"expected --months {exp.months}")
+    if exp.pdf:
         if "--no-pdf" in last:
             fails.append("PDF was switched off with --no-pdf")
-        pdfs = re.findall(r'"pdf":"([^"]+)"', "\n".join(res["outputs"]))
-        if pdfs and not any(pdf in res["answer"] or Path(pdf).parent.name in res["answer"] for pdf in pdfs):
-            fails.append("answer does not give the PDF path")
-    if exp.get("question") and "--question" not in last:
+        pdfs = set(re.findall(r'"pdf(?:_shared)?":"([^"]+)"', "\n".join(res["outputs"])))
+        shown = {p for c in res["calls"] if c["tool"] == "present_files" for p in c["args"].get("filepaths") or []}
+        if pdfs and not pdfs & shown:
+            fails.append("PDF not shown to the user (no present_files call with files.pdf_shared or files.pdf)")
+    if exp.question and "--question" not in last:
         fails.append("expected --question (the PDF title)")
-    if len(res["calls"]) > exp.get("max_tool_calls", 6):
+    if len(res["calls"]) > exp.max_tool_calls:
         fails.append(f"too many tool calls: {len(res['calls'])}")
     low = res["answer"].lower()
-    for group in exp.get("mention_any", []):
+    for group in exp.mention_any:
         if not any(w.lower() in low for w in group):
             fails.append(f"answer mentions none of {group}")
     ok = allowed_percents(res["outputs"])
@@ -222,29 +274,39 @@ def main():
     key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("EVAL_API_KEY")
     if not key:
         sys.exit("set OPENROUTER_API_KEY (or EVAL_API_KEY for another OpenAI-compatible endpoint)")
-    env = dict(os.environ, WI_OUT=str(SKILL_DIR / "evals" / "out"))
+    out = SKILL_DIR / "evals" / "out"
+    env = dict(os.environ, WI_OUT=str(out), WI_SHARE_DIR=str(out / "shared"))  # like the claude.ai sandbox
     if a.fake_api:
         env["WI_FAKE_API"] = "1"
-    scenarios = json.loads((SKILL_DIR / "evals" / "scenarios.json").read_text())
+    scenarios = load_scenarios()
     if a.only:
-        scenarios = [s for s in scenarios if s["id"] in a.only.split(",")]
+        scenarios = [s for s in scenarios if s.id in a.only.split(",")]
     TRACES.mkdir(parents=True, exist_ok=True)
+    console = Console()
+    table = Table(title=f"wiki-interest evals · {a.model}", title_justify="left", header_style="bold cyan")
+    for col in ("", "scenario", "calls", "tokens in+out", "failures"):
+        table.add_column(col)
     total, passed = 0, 0
     for sc in scenarios:
         for rep in range(a.repeats):
-            res = run_scenario(sc, lambda m: chat(a.base_url, key, a.model, m), env)
+            with console.status(f"{sc.id} (run {rep + 1}/{a.repeats})"):
+                res = run_scenario(sc, lambda m: chat(a.base_url, key, a.model, m), env)
             fails = check(sc, res)
             total += 1
             passed += not fails
             tag = re.sub(r"\W+", "_", a.model)
-            (TRACES / f"{sc['id']}_{tag}_{rep}.json").write_text(
-                json.dumps({"scenario": sc, "fails": fails, **res}, ensure_ascii=False, indent=1)
+            (TRACES / f"{sc.id}_{tag}_{rep}.json").write_text(
+                json.dumps({"scenario": sc.model_dump(), "fails": fails, **res}, ensure_ascii=False, indent=1)
             )
-            print(
-                f"{'PASS' if not fails else 'FAIL'}  {sc['id']:<22} calls={len(res['calls'])} "
-                f"tokens={res['usage']['prompt_tokens']}+{res['usage']['completion_tokens']}  {'; '.join(fails)}"
+            table.add_row(
+                "[green]PASS[/]" if not fails else "[red]FAIL[/]",
+                sc.id,
+                str(len(res["calls"])),
+                f"{res['usage']['prompt_tokens']}+{res['usage']['completion_tokens']}",
+                "; ".join(fails),
             )
-    print(f"\n{passed}/{total} passed on {a.model}")
+    console.print(table)
+    console.print(f"{passed}/{total} passed on {a.model}", style="bold green" if passed == total else "bold red")
     sys.exit(0 if passed == total else 1)
 
 

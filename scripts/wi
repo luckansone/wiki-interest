@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Launcher for the skill CLI. stdout is always one JSON object; setup messages go to stderr.
 #   1. WI_PYTHON set  -> use that interpreter as is.
-#   2. uv on PATH     -> `uv run --frozen`: Python from .python-version (downloaded if missing),
-#                        runtime deps from uv.lock, synced into .venv (dev tools are not installed).
+#   2. uv on PATH     -> `uv run --frozen`: a Python matching requires-python in pyproject.toml (downloaded if
+#                        missing), runtime deps from uv.lock, synced into .venv (dev tools are not installed).
 #   3. a Python >= 3.11 that already has the packages (e.g. the claude.ai code sandbox) -> use it, no install.
-#   4. otherwise      -> a Python >= 3.11 from PATH + pip, pinned by requirements.txt (exported from uv.lock).
+#   4. otherwise      -> a Python >= 3.11 from PATH + pip, installing [project].dependencies from pyproject.toml.
 set -euo pipefail
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -19,7 +19,7 @@ fi
 VENV="$DIR/.venv"
 if [ ! -f "$VENV/.wi-ready" ]; then
   HAS_DEPS='import sys; assert sys.version_info >= (3, 11)
-import pandas, numpy, scipy, matplotlib, requests
+import pandas, numpy, scipy, matplotlib, requests, pydantic, rich, loguru
 assert int(pandas.__version__.split(".")[0]) >= 2'
   for c in python3 python3.14 python3.13 python3.12 python3.11; do
     if command -v "$c" >/dev/null 2>&1 && "$c" -c "$HAS_DEPS" 2>/dev/null; then
@@ -43,7 +43,11 @@ if [ ! -f "$VENV/.wi-ready" ]; then
   fi
   echo "wi: first run, creating $VENV with $PY (about a minute)..." >&2
   "$PY" -m venv --clear "$VENV" >&2
-  "$VENV/bin/pip" install -q --disable-pip-version-check -r "$DIR/requirements.txt" >&2
+  # pyproject.toml is the single source of dependencies; tomllib is in the stdlib since Python 3.11.
+  "$VENV/bin/python" -c 'import subprocess, sys, tomllib
+deps = tomllib.load(open(sys.argv[1], "rb"))["project"]["dependencies"]
+sys.exit(subprocess.call([sys.executable, "-m", "pip", "install", "-q", "--disable-pip-version-check", *deps]))' \
+    "$DIR/pyproject.toml" >&2
   touch "$VENV/.wi-ready"
 fi
 exec "$VENV/bin/python" "$DIR/scripts/wi.py" "$@"

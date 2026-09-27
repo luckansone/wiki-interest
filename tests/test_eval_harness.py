@@ -35,7 +35,7 @@ def scripted(steps):
 
 
 def env(tmp_path):
-    return dict(os.environ, WI_FAKE_API="1", WI_OUT=str(tmp_path))
+    return dict(os.environ, WI_FAKE_API="1", WI_OUT=str(tmp_path), WI_SHARE_DIR=str(tmp_path / "shared"))
 
 
 SC = {"id": "t", "prompt": "x", "expect": {"langs": ["pl", "cs"], "months": 24, "mention_any": [["довіра"]]}}
@@ -92,9 +92,25 @@ def test_pdf_path_and_question_are_required_when_expected(tmp_path):
     sc = {"id": "t", "prompt": "x", "expect": {"langs": ["pl", "cs"], "pdf": True, "question": True}}
     cmd = CMD + ' --pdf --question "Q?"'
     res = run_eval.run_scenario(sc, scripted([("bash", {"command": cmd}), "ANSWER_FROM_TOOL"]), env(tmp_path))
-    assert run_eval.check(sc, res) == ["answer does not give the PDF path"]
-    pdf = json.loads(res["outputs"][-1])["files"]["pdf"]
-    res["answer"] += f"\nPDF: {pdf}"
+    no_card = "PDF not shown to the user (no present_files call with files.pdf_shared or files.pdf)"
+    assert run_eval.check(sc, res) == [no_card]  # a path in the text is not enough
+    shared = json.loads(res["outputs"][-1])["files"]["pdf_shared"]
+    assert "shown to the user" in run_eval.run_tool("present_files", {"filepaths": [shared]}, {})
+    res["calls"].append({"tool": "present_files", "args": {"filepaths": [shared]}})
     assert run_eval.check(sc, res) == []
-    res["calls"][-1]["args"]["command"] = CMD + " --no-pdf"
+    next(c for c in res["calls"] if c["tool"] == "bash")["args"]["command"] = CMD + " --no-pdf"
     assert run_eval.check(sc, res) == ["PDF was switched off with --no-pdf", "expected --question (the PDF title)"]
+
+
+def test_present_files_rejects_missing_files():
+    assert run_eval.run_tool("present_files", {"filepaths": ["/nope/report.pdf"]}, {}).startswith("error:")
+    assert run_eval.run_tool("present_files", {"filepaths": []}, {}).startswith("error:")
+
+
+def test_scenarios_file_is_valid_and_typos_fail():
+    import pytest
+    from pydantic import ValidationError
+
+    assert {s.id for s in run_eval.load_scenarios()} >= {"q1_fasting_pl_cs", "q3_no_langs_clarify"}
+    with pytest.raises(ValidationError):
+        run_eval.Scenario.model_validate({"id": "x", "prompt": "y", "expect": {"pfd": True}})

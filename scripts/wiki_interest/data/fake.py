@@ -1,7 +1,8 @@
 """Offline stand-in for Wikimedia/Wikidata that returns responses in the real JSON format.
 
-Values are SYNTHETIC (deterministic formulas + seeded noise). They exist to test the
-pipeline and the statistics, not to say anything about real interest.
+Values are SYNTHETIC (deterministic formulas + seeded noise). They exist for the demo mode
+(WI_FAKE_API=1), tests and evals, not to say anything about real interest. Reports made
+from them carry a red "DEMO" banner.
 """
 
 from __future__ import annotations
@@ -13,7 +14,8 @@ from urllib.parse import unquote
 
 import numpy as np
 
-import wiki_api
+from wiki_interest.config import WIKIDATA_URL
+from wiki_interest.data.languages import wikidata_site
 
 
 # title -> (qid, {lang: localized title}); only a few langs lack an article on purpose.
@@ -64,8 +66,8 @@ def _series(lang: str, key: str, months, growth: float, base: float, spike: bool
     return np.maximum(y, 0).round()
 
 
-def http_get_json(url, params=None, ttl_s=None):
-    if url == wiki_api.WIKIDATA:
+def get_json(url: str, params: dict | None = None, ttl_s: float | None = None):
+    if url == WIKIDATA_URL:
         title = params.get("titles")
         if title not in TOPICS:
             return {"entities": {"-1": {"site": "enwiki", "title": title, "missing": ""}}}
@@ -77,9 +79,9 @@ def http_get_json(url, params=None, ttl_s=None):
                     "id": qid,
                     "labels": {"en": {"language": "en", "value": title}},
                     "sitelinks": {
-                        wiki_api.wikidata_site(l): {"site": wiki_api.wikidata_site(l), "title": t}
+                        wikidata_site(l): {"site": wikidata_site(l), "title": t}
                         for l, t in links.items()
-                        if sites is None or wiki_api.wikidata_site(l) in sites
+                        if sites is None or wikidata_site(l) in sites
                     },
                 }
             }

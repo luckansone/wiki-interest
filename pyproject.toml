@@ -1,6 +1,6 @@
 [project]
 name = "wiki-interest"
-version = "0.2.0"
+version = "0.3.0"
 description = "Agent Skill: topic interest trends across Wikipedia language editions, with confidence, charts and a PDF report (one-page summary + appendix)"
 readme = "README.md"
 keywords = ["agent-skills", "wikipedia", "pageviews", "wikidata", "trend-analysis", "localization"]
@@ -23,6 +23,9 @@ dependencies = [
     "numpy >= 1.26, < 3",
     "scipy >= 1.13, < 2",
     "matplotlib >= 3.9, < 4",
+    "pydantic >= 2.9, < 3",
+    "rich >= 13.9, < 16",
+    "loguru >= 0.7.2, < 1",
 ]
 
 [dependency-groups]
@@ -78,7 +81,7 @@ ignore = [
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
-known-first-party = ["metrics", "report", "wi", "wiki_api", "fake_api", "run_eval"]
+known-first-party = ["wiki_interest", "wi", "run_eval", "test_models"]
 
 [tool.pytest.ini_options]
 addopts = "--strict-markers --strict-config"

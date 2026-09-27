@@ -12,8 +12,6 @@ uv_show_deps:
 	uv pip list
 uv_show_deps_tree:
 	uv tree
-uv_export_requirements:
-	uv export --frozen --no-dev --no-hashes --no-emit-project -o requirements.txt
 
 pre_commit_install: .pre-commit-config.yaml
 	uv run pre-commit install
@@ -47,7 +45,7 @@ eval:
 # Upload package for Claude (limit 30 MB): an explicit allowlist, so .venv, caches, run outputs
 # and local settings (.claude/) never get in. The zip root is the skill folder: wiki-interest/SKILL.md.
 SKILL_NAME = wiki-interest
-SKILL_FILES = SKILL.md README.md pyproject.toml uv.lock .python-version requirements.txt \
+SKILL_FILES = SKILL.md README.md pyproject.toml uv.lock \
 	references scripts tests evals/run_eval.py evals/scenarios.json
 skill_zip:
 	rm -rf dist/$(SKILL_NAME) dist/$(SKILL_NAME).zip
@@ -58,5 +56,5 @@ skill_zip:
 	@ls -lh dist/$(SKILL_NAME).zip | awk '{print "dist/$(SKILL_NAME).zip: " $$5}'
 
 .PHONY: uv_install_deps uv_install_deps_runtime uv_get_lock uv_update_deps uv_update_self uv_show_deps \
-	uv_show_deps_tree uv_export_requirements pre_commit_install pre_commit_run pre_commit_rm_hooks \
+	uv_show_deps_tree pre_commit_install pre_commit_run pre_commit_rm_hooks \
 	lint format test test_cov demo eval skill_zip

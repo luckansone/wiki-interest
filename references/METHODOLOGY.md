@@ -1,6 +1,6 @@
 # Methodology (MVP)
 
-All computation lives in `scripts/metrics.py`. Thresholds are constants at the top of that file.
+The computation is in `scripts/wiki_interest/analysis/` (`stats.py`, `metrics.py`, `ranking.py`). The thresholds are in `scripts/wiki_interest/config.py` (class `Thresholds`).
 
 ## Data
 

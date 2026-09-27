@@ -5,22 +5,23 @@ import json
 import pytest
 from pypdf import PdfReader
 
-import fake_api
-import wi
-import wiki_api
+from wiki_interest.cli import main
 
 
 @pytest.fixture(autouse=True)
 def offline(monkeypatch, tmp_path):
-    monkeypatch.setattr(wiki_api, "http_get_json", fake_api.http_get_json)
-    monkeypatch.setattr(wi, "OUT_DIR", tmp_path / "out")
-    monkeypatch.setenv("WI_SYNTHETIC", "1")
+    monkeypatch.setenv("WI_FAKE_API", "1")  # synthetic responses in the real API format
+    monkeypatch.setenv("WI_OUT", str(tmp_path / "out"))
+    monkeypatch.delenv("WI_LOG", raising=False)
+    monkeypatch.setenv("WI_SHARE_DIR", "off")  # tests opt in to sharing explicitly
 
 
 def run(capsys, *args):
     with pytest.raises(SystemExit) as e:
-        wi.main(list(args))
-    out = json.loads(capsys.readouterr().out)
+        main(list(args))
+    captured = capsys.readouterr()
+    out = json.loads(captured.out)  # stdout is exactly one JSON object
+    run.stderr = captured.err
     return e.value.code, out
 
 
@@ -152,3 +153,52 @@ def test_appendix_flows_onto_more_pages_and_keeps_long_conclusion(capsys):
     assert "Повний висновок" in pages[1]
     appendix = "".join(pages[1:])
     assert "2016-09" in appendix and "2026-08" in appendix  # first and last month, nothing dropped
+
+
+def test_piped_stderr_stays_quiet_for_agents(capsys):
+    """Agents read stderr too: a successful run on a pipe must not add log lines to their context."""
+    code, _ = run(capsys, "analyze", "--topic", "Intermittent fasting", "--langs", "pl,cs", "--no-pdf")
+    assert code == 0 and run.stderr == ""
+
+
+def test_plain_log_mode_reports_stages(capsys):
+    code, _ = run(capsys, "--log", "plain", "analyze", "--topic", "Intermittent fasting", "--langs", "pl", "--no-pdf")
+    assert code == 0
+    assert "fetch" in run.stderr and "analyze" in run.stderr and "render" in run.stderr
+
+
+def test_unexpected_error_still_answers_json(capsys, monkeypatch):
+    from wiki_interest import pipeline
+
+    def boom(*a, **k):
+        raise KeyError("oops")
+
+    monkeypatch.setattr(pipeline, "analyze", boom)
+    code, out = run(capsys, "analyze", "--topic", "Astronomy", "--langs", "pl")
+    assert code == 1 and out["error"].startswith("internal error: KeyError") and "WI_LOG" in out["fix"]
+    code, out = run(capsys, "--log", "plain", "analyze", "--topic", "Astronomy", "--langs", "pl")
+    assert "Traceback" in run.stderr and "KeyError: 'oops'" in run.stderr  # plain mode is for bug reports
+
+
+def test_pdf_is_copied_to_the_chat_share_folder(capsys, monkeypatch, tmp_path):
+    """In a chat sandbox (claude.ai) the user sees only files in the outputs folder."""
+    monkeypatch.setenv("WI_SHARE_DIR", str(tmp_path / "outputs"))
+    code, out = run(capsys, "analyze", "--topic", "Intermittent fasting", "--langs", "pl,cs")
+    shared = out["files"]["pdf_shared"]
+    assert code == 0 and shared.startswith(str(tmp_path / "outputs"))
+    assert shared.endswith(f"wiki-interest-intermittent-fasting-{out['run_id']}.pdf")
+    assert open(shared, "rb").read() == open(out["files"]["pdf"], "rb").read()
+    _, rep = run(capsys, "report", "--run-id", out["run_id"], "--conclusion", "Новий висновок.")
+    assert rep["files"]["pdf_shared"] == shared  # the re-rendered PDF replaces the shared copy
+
+
+def test_no_share_folder_outside_a_chat_sandbox(capsys, monkeypatch):
+    from wiki_interest import config
+
+    monkeypatch.delenv("WI_SHARE_DIR", raising=False)
+    monkeypatch.setattr(config, "CHAT_OUTPUTS_DIR", config.Path("/nonexistent/outputs"))
+    code, out = run(capsys, "analyze", "--topic", "Intermittent fasting", "--langs", "pl", "--no-pdf")
+    assert code == 0 and "pdf_shared" not in out["files"]
+    monkeypatch.setenv("WI_SHARE_DIR", "off")
+    code, out = run(capsys, "analyze", "--topic", "Intermittent fasting", "--langs", "pl")
+    assert code == 0 and "pdf" in out["files"] and "pdf_shared" not in out["files"]

@@ -1,14 +1,14 @@
 ---
 name: wiki-interest
 description: Measures how interest in a topic changes across Wikipedia language editions using Wikimedia pageview statistics, with trend confidence, charts and a PDF report (one-page summary + appendix). Use when a B2C founder or product team asks whether interest in a topic (course, subject, niche) is growing, how languages/markets compare, which language to localize into or which audience to research next. Keywords - Wikipedia pageviews, interest trend, topic demand, localization, language market, інтерес до теми, перегляди Вікіпедії, яку мову запускати, зростання інтересу.
-compatibility: bash, internet access to wikimedia.org and wikidata.org, and uv (preferred; fetches Python 3.13 itself) or Python 3.11+. First run creates .venv (~1 min).
+compatibility: bash, internet access to wikimedia.org and wikidata.org, and uv (preferred; fetches a suitable Python itself) or Python 3.11–3.14. First run creates .venv (~1 min).
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # wiki-interest
 
-**Every `analyze` run produces a PDF report (page 1: one-page summary; then an appendix with the ranking, per-language details, all limitations and monthly pageviews), and your answer must give its `files.pdf` path.** If you need to ask the user something first (e.g. which languages), ask before running anything.
+**Every `analyze` run produces a PDF report (page 1: one-page summary; then an appendix with the ranking, per-language details, all limitations and monthly pageviews), and you must show that PDF to the user as a file (section 4, step 7).** If you need to ask the user something first (e.g. which languages), ask before running anything.
 
 All numbers are computed by `scripts/wi`. **Never compute, estimate or round numbers
 yourself. Quote them from the command output.**
@@ -69,8 +69,9 @@ bash scripts/wi analyze --topic "Intermittent fasting" --langs pl,cs --months 24
   - `flags`: data problems (see below).
   - `status: "no_data"`: the topic has no article in that language.
 - `ranking`: languages ordered by score (growth 50%, share of interest 30%, confidence 20% by default). `why` gives the reasons. `best_trend_in_set` means "least bad of the chosen languages", not growth.
-- `files`: the paths to `pdf` and `chart_png`, plus `run.json` with the full data. `files.pdf` must be present. If it is missing and `warnings` do not explain why, the command was run with `--no-pdf`: re-run it without that flag.
+- `files`: the paths `pdf`, `chart_png`, `series_csv` and `run_json` (the full data). `pdf_shared` (only in a chat sandbox, e.g. claude.ai) is a copy of the PDF in the folder the chat shows to the user. `files.pdf` must be present. If it is missing and `warnings` do not explain why, the command was run with `--no-pdf`: re-run it without that flag.
 - `warnings` (only if present): tell the user, e.g. why no PDF was made.
+- stderr is normally empty. A `wi: warning: ...` line reports a retry or characters the PDF font cannot show. Mention it only if it affects the answer.
 
 Flags, and what to tell the user:
 
@@ -89,7 +90,11 @@ Flags, and what to tell the user:
 4. For ranking questions, name the top 2–3 languages and their `why`.
 5. Always add this limitation: pageviews show interest, not willingness to pay; a language edition is not a country.
 6. Suggest one next validation step (survey, landing-page test, app-store search data).
-7. Always end with the PDF report: give the full `files.pdf` path. If no PDF was created, relay the reason from `warnings` (e.g. no language has an article) and offer a re-run with a broader `--topic`.
+7. Always end with the PDF report, shown as a file:
+   - If you have a tool that shows or sends files to the user (for example `present_files` on claude.ai, or a send-file tool in Claude Code), call it with `files.pdf_shared` if it exists, else with `files.pdf`. A path in the text alone does not show the file.
+   - If you have no such tool, give the full `files.pdf` path.
+
+   If no PDF was created, relay the reason from `warnings` (e.g. no language has an article) and offer a re-run with a broader `--topic`.
 
 Rules:
 
@@ -104,7 +109,7 @@ If a language has `status: "no_data"`: say that edition has no article on this t
 
 ## 5. Report with your own wording (optional)
 
-The PDF from `analyze --pdf` already contains an automatic conclusion. To replace it with yours, run the command below. Keep it to 2–4 sentences, using only numbers from the output (page 1 shows up to 700 characters; a longer text is printed in full in the appendix). The appendix is re-rendered too.
+The PDF from `analyze --pdf` already contains an automatic conclusion. To replace it with yours, run the command below. Keep it to 2–4 sentences, using only numbers from the output (page 1 shows up to 700 characters; a longer text is printed in full in the appendix). The appendix is re-rendered too. Show the new PDF to the user again (step 7): the output has `files.pdf` and, in a chat sandbox, `files.pdf_shared`.
 
 ```bash
 bash scripts/wi report --run-id <run_id> --conclusion "<text>"
@@ -112,6 +117,6 @@ bash scripts/wi report --run-id <run_id> --conclusion "<text>"
 
 ## 6. Follow-up questions
 
-Re-run `analyze` with the changed arguments, again with `--pdf`, and give the new PDF path ("add Slovak" → `--langs pl,cs,sk`; "over 3 years" → `--months 36`). Responses are cached on disk: changing `--months`, `--weights` or the language list only downloads the articles and editions not fetched before (the cache refreshes when a new month completes). Tell the user what changed compared to the previous answer.
+Re-run `analyze` with the changed arguments, again with `--pdf`, and show the new PDF (step 7) ("add Slovak" → `--langs pl,cs,sk`; "over 3 years" → `--months 36`). Responses are cached on disk: changing `--months`, `--weights` or the language list only downloads the articles and editions not fetched before (the cache refreshes when a new month completes). Tell the user what changed compared to the previous answer.
 
 Methodology details, if the user asks how numbers are computed: `references/METHODOLOGY.md`.
